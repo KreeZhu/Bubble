@@ -2743,7 +2743,7 @@ MonoBehaviour:
   bubbleScale: 1.2
   launchSpeed: 6
   riseSpeed: 1.5
-  bubbleBounceBackDistance: 0.3
+  bubbleBounceBackDistance: 0.35
   playerBounceForce: 9
   lifeTime: 8
 --- !u!1 &2131315700
