@@ -2542,6 +2542,7 @@ GameObject:
   - component: {fileID: 2112904036}
   - component: {fileID: 2112904037}
   - component: {fileID: 2112904038}
+  - component: {fileID: 2112904039}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -2606,7 +2607,7 @@ MeshRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2112904029}
-  m_Enabled: 1
+  m_Enabled: 0
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
@@ -2743,9 +2744,26 @@ MonoBehaviour:
   bubbleScale: 1.2
   launchSpeed: 6
   riseSpeed: 1.5
-  bubbleBounceBackDistance: 0.35
+  bubbleBounceBackDistance: 0.2
   playerBounceForce: 9
   lifeTime: 8
+--- !u!114 &2112904039
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2112904029}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9f51a40d9dc54b46852c2f7bc7a02031, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  rebuildInEditMode: 1
+  hideOriginalRenderer: 1
+  preferBakedVisual: 1
+  modelScale: 1
+  localOffset: {x: 0, y: -0.55, z: 0}
 --- !u!1 &2131315700
 GameObject:
   m_ObjectHideFlags: 0
