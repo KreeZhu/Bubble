@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using UnityEngine;
 
 [ExecuteAlways]
@@ -41,6 +44,9 @@ public class HeroineModelBuilder : MonoBehaviour
     private Material shoeShadowMetalMaterial;
     private Material bubbleMaterial;
     private bool buildingPersistentVisual;
+#if UNITY_EDITOR
+    private bool editorRebuildQueued;
+#endif
 
     private void OnEnable()
     {
@@ -49,7 +55,9 @@ public class HeroineModelBuilder : MonoBehaviour
 
     private void OnValidate()
     {
-        RequestRebuild();
+#if UNITY_EDITOR
+        QueueEditorRebuild();
+#endif
     }
 
     private void RequestRebuild()
@@ -64,15 +72,25 @@ public class HeroineModelBuilder : MonoBehaviour
             return;
 
 #if UNITY_EDITOR
-        UnityEditor.EditorApplication.delayCall -= RebuildModelFromEditorDelay;
-        UnityEditor.EditorApplication.delayCall += RebuildModelFromEditorDelay;
+        QueueEditorRebuild();
 #endif
     }
 
 #if UNITY_EDITOR
+    private void QueueEditorRebuild()
+    {
+        if (Application.isPlaying || !rebuildInEditMode || editorRebuildQueued)
+            return;
+
+        editorRebuildQueued = true;
+        UnityEditor.EditorApplication.delayCall -= RebuildModelFromEditorDelay;
+        UnityEditor.EditorApplication.delayCall += RebuildModelFromEditorDelay;
+    }
+
     private void RebuildModelFromEditorDelay()
     {
         UnityEditor.EditorApplication.delayCall -= RebuildModelFromEditorDelay;
+        editorRebuildQueued = false;
 
         if (this != null && !Application.isPlaying && rebuildInEditMode)
             RebuildModel();
@@ -138,6 +156,8 @@ public class HeroineModelBuilder : MonoBehaviour
         EnsureAssetFolder(heroineFolder, "Meshes");
         EnsureAssetFolder(heroineFolder, "Materials");
 
+        ClearGeneratedAssetsInFolder(meshFolder, ".asset");
+        ClearGeneratedAssetsInFolder(materialFolder, ".mat");
         PersistGeneratedMeshes(bakedRoot, meshFolder);
         PersistGeneratedMaterials(bakedRoot, materialFolder);
 
@@ -151,11 +171,84 @@ public class HeroineModelBuilder : MonoBehaviour
             Debug.LogError($"Failed to save heroine visual prefab: {prefabPath}", this);
     }
 
+    [ContextMenu("Export Heroine Validation Report")]
+    public void ExportHeroineValidationReport()
+    {
+        bool passed = ValidateHeroinePlayerSetup();
+        Transform root = GetActiveVisualRoot();
+
+        EnsureAssetFolder("Assets", "ConceptArt");
+        const string reportPath = "Assets/ConceptArt/heroine_model_validation_report.md";
+
+        StringBuilder report = new StringBuilder();
+        report.AppendLine("# Heroine Model Validation Report");
+        report.AppendLine();
+        report.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        report.AppendLine($"Status: {(passed ? "PASS" : "NEEDS REVIEW")}");
+        report.AppendLine($"Player object: {gameObject.name}");
+        report.AppendLine($"Active visual root: {(root != null ? root.name : "None")}");
+        report.AppendLine();
+
+        report.AppendLine("## Binding");
+        report.AppendLine($"- PlayerMovement present: {GetComponent<PlayerMovement>() != null}");
+        report.AppendLine($"- Rigidbody present: {GetComponent<Rigidbody>() != null}");
+        MeshRenderer ownRenderer = GetComponent<MeshRenderer>();
+        report.AppendLine($"- Original MeshRenderer hidden: {ownRenderer == null || !ownRenderer.enabled}");
+        report.AppendLine($"- Prefer baked visual: {preferBakedVisual}");
+        report.AppendLine($"- Baked scene visual present: {transform.Find(BakedVisualRootName) != null}");
+        report.AppendLine($"- Preview visual present: {transform.Find(VisualRootName) != null}");
+        bool prefabAssetPresent = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Heroine/HeroineBakedVisual.prefab") != null;
+        report.AppendLine($"- Saved prefab asset present: {prefabAssetPresent}");
+        report.AppendLine();
+
+        report.AppendLine("## Visual Diagnostics");
+        report.AppendLine($"- Summary: {lastValidationSummary}");
+        report.AppendLine($"- Generated part count: {generatedPartCount}");
+        report.AppendLine($"- Generated vertex count: {generatedVertexCount}");
+        report.AppendLine($"- Generated triangle count: {generatedTriangleCount}");
+        report.AppendLine($"- Local bounds center: {FormatVector(generatedLocalBounds.center)}");
+        report.AppendLine($"- Local bounds size: {FormatVector(generatedLocalBounds.size)}");
+        report.AppendLine();
+
+        if (root != null && TryCalculateRootSpaceBounds(root, out Bounds bounds, out int partCount, out int vertexCount, out int triangleCount))
+        {
+            report.AppendLine("## Recalculated Bounds");
+            report.AppendLine($"- Parts: {partCount}");
+            report.AppendLine($"- Vertices: {vertexCount}");
+            report.AppendLine($"- Triangles: {triangleCount}");
+            report.AppendLine($"- Bounds min: {FormatVector(bounds.min)}");
+            report.AppendLine($"- Bounds max: {FormatVector(bounds.max)}");
+            report.AppendLine($"- Bounds size: {FormatVector(bounds.size)}");
+            report.AppendLine();
+        }
+
+        report.AppendLine("## Manual Visual Review Still Required");
+        report.AppendLine("- Compare the silhouette to the first concept image in the Scene/Game view.");
+        report.AppendLine("- Check front, side, and back readability after baking or prefab saving.");
+        report.AppendLine("- Playtest movement and jumping to judge hair, cape, and skirt sway strength.");
+        report.AppendLine("- Confirm the model does not visually fight the capsule/player collision size.");
+
+        File.WriteAllText(reportPath, report.ToString(), Encoding.UTF8);
+        UnityEditor.AssetDatabase.ImportAsset(reportPath);
+        Debug.Log($"Exported heroine validation report: {reportPath}", this);
+    }
+
     private static void EnsureAssetFolder(string parentFolder, string childFolder)
     {
         string folderPath = parentFolder + "/" + childFolder;
         if (!UnityEditor.AssetDatabase.IsValidFolder(folderPath))
             UnityEditor.AssetDatabase.CreateFolder(parentFolder, childFolder);
+    }
+
+    private static void ClearGeneratedAssetsInFolder(string folderPath, string extension)
+    {
+        string[] assetGuids = UnityEditor.AssetDatabase.FindAssets(string.Empty, new[] { folderPath });
+        foreach (string assetGuid in assetGuids)
+        {
+            string assetPath = UnityEditor.AssetDatabase.GUIDToAssetPath(assetGuid);
+            if (Path.GetExtension(assetPath) == extension)
+                UnityEditor.AssetDatabase.DeleteAsset(assetPath);
+        }
     }
 
     private static void PersistGeneratedMeshes(Transform root, string meshFolder)
@@ -411,18 +504,18 @@ public class HeroineModelBuilder : MonoBehaviour
 
     private void CreateMaterials()
     {
-        skinMaterial = MakeMaterial("Heroine Skin", new Color(0.86f, 0.58f, 0.42f, 1f));
-        skinShadowMaterial = MakeMaterial("Heroine Skin Shadow", new Color(0.64f, 0.36f, 0.27f, 1f));
-        hairMaterial = MakeMaterial("Heroine Blue Hair", new Color(0.04f, 0.28f, 0.85f, 1f));
-        hairDarkMaterial = MakeMaterial("Heroine Dark Blue Hair", new Color(0.02f, 0.12f, 0.42f, 1f));
-        hairHighlightMaterial = MakeMaterial("Heroine Clear Blue Hair Highlight", new Color(0.12f, 0.60f, 1.00f, 1f));
-        eyeMaterial = MakeMaterial("Heroine Blue Eyes", new Color(0.13f, 0.55f, 0.86f, 1f));
+        skinMaterial = MakeMaterial("Heroine Skin", new Color(0.94f, 0.66f, 0.49f, 1f));
+        skinShadowMaterial = MakeMaterial("Heroine Skin Shadow", new Color(0.72f, 0.42f, 0.31f, 1f));
+        hairMaterial = MakeMaterial("Heroine Blue Hair", new Color(0.06f, 0.34f, 0.98f, 1f));
+        hairDarkMaterial = MakeMaterial("Heroine Dark Blue Hair", new Color(0.03f, 0.14f, 0.52f, 1f));
+        hairHighlightMaterial = MakeMaterial("Heroine Clear Blue Hair Highlight", new Color(0.16f, 0.68f, 1.00f, 1f));
+        eyeMaterial = MakeMaterial("Heroine Blue Eyes", new Color(0.22f, 0.72f, 1.00f, 1f));
         faceLineMaterial = MakeMaterial("Heroine Face Lines", new Color(0.09f, 0.07f, 0.08f, 1f));
-        whiteClothMaterial = MakeMaterial("Heroine Ivory Cloth", new Color(0.82f, 0.78f, 0.68f, 1f));
-        whiteShadowMaterial = MakeMaterial("Heroine Ivory Cloth Shadow", new Color(0.62f, 0.58f, 0.50f, 1f));
-        tealClothMaterial = MakeMaterial("Heroine Teal Cloth", new Color(0.04f, 0.25f, 0.29f, 1f));
-        darkLeggingMaterial = MakeMaterial("Heroine Dark Leggings", new Color(0.08f, 0.09f, 0.11f, 1f));
-        beltMaterial = MakeMaterial("Heroine Leather Belt", new Color(0.33f, 0.20f, 0.12f, 1f));
+        whiteClothMaterial = MakeMaterial("Heroine Ivory Cloth", new Color(0.94f, 0.89f, 0.78f, 1f));
+        whiteShadowMaterial = MakeMaterial("Heroine Ivory Cloth Shadow", new Color(0.78f, 0.73f, 0.62f, 1f));
+        tealClothMaterial = MakeMaterial("Heroine Teal Cloth", new Color(0.09f, 0.38f, 0.42f, 1f));
+        darkLeggingMaterial = MakeMaterial("Heroine Dark Leggings", new Color(0.12f, 0.13f, 0.16f, 1f));
+        beltMaterial = MakeMaterial("Heroine Leather Belt", new Color(0.42f, 0.26f, 0.15f, 1f));
         goldMaterial = MakeMaterial("Heroine Warm Gold", new Color(0.95f, 0.67f, 0.22f, 1f));
         shoeMetalMaterial = MakeMaterial("Heroine Light Shoe Metal", new Color(0.73f, 0.78f, 0.79f, 1f));
         shoeBrightMetalMaterial = MakeMaterial("Heroine Bright Shoe Metal", new Color(0.90f, 0.96f, 0.98f, 1f));
@@ -433,13 +526,25 @@ public class HeroineModelBuilder : MonoBehaviour
 
     private Material MakeMaterial(string materialName, Color color)
     {
-        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+        Shader shader = Shader.Find("Universal Render Pipeline/Simple Lit");
+        if (shader == null)
+            shader = Shader.Find("Universal Render Pipeline/Lit");
         if (shader == null)
             shader = Shader.Find("Standard");
 
         Material material = new Material(shader);
         material.name = materialName;
         material.color = color;
+        if (material.HasProperty("_BaseColor"))
+            material.SetColor("_BaseColor", color);
+        if (material.HasProperty("_Color"))
+            material.SetColor("_Color", color);
+        if (material.HasProperty("_Smoothness"))
+            material.SetFloat("_Smoothness", 0.12f);
+        if (material.HasProperty("_Metallic"))
+            material.SetFloat("_Metallic", 0f);
+        if (material.HasProperty("_SpecColor"))
+            material.SetColor("_SpecColor", new Color(0.08f, 0.08f, 0.08f, 1f));
         ApplyGeneratedObjectFlags(material);
         return material;
     }
@@ -485,12 +590,12 @@ public class HeroineModelBuilder : MonoBehaviour
 
     private void BuildFace(Transform root)
     {
-        CreateLowPolyBox(root, "LeftEye", new Vector3(-0.075f, 1.58f, 0.195f), new Vector3(0.055f, 0.020f, 0.012f), eyeMaterial, Quaternion.Euler(0f, 0f, -6f));
-        CreateLowPolyBox(root, "RightEye", new Vector3(0.075f, 1.58f, 0.195f), new Vector3(0.055f, 0.020f, 0.012f), eyeMaterial, Quaternion.Euler(0f, 0f, 6f));
-        CreateLowPolyBox(root, "LeftBrow", new Vector3(-0.078f, 1.625f, 0.196f), new Vector3(0.070f, 0.014f, 0.012f), hairDarkMaterial, Quaternion.Euler(0f, 0f, -14f));
-        CreateLowPolyBox(root, "RightBrow", new Vector3(0.078f, 1.625f, 0.196f), new Vector3(0.070f, 0.014f, 0.012f), hairDarkMaterial, Quaternion.Euler(0f, 0f, 14f));
-        CreateLowPolyBox(root, "NoseBridge", new Vector3(0f, 1.535f, 0.205f), new Vector3(0.024f, 0.070f, 0.018f), skinShadowMaterial, Quaternion.Euler(0f, 0f, 0f));
-        CreateLowPolyBox(root, "Mouth", new Vector3(0f, 1.445f, 0.200f), new Vector3(0.075f, 0.012f, 0.010f), faceLineMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "LeftEye", new Vector3(-0.078f, 1.585f, 0.232f), new Vector3(0.064f, 0.024f, 0.014f), eyeMaterial, Quaternion.Euler(0f, 0f, -6f));
+        CreateLowPolyBox(root, "RightEye", new Vector3(0.078f, 1.585f, 0.232f), new Vector3(0.064f, 0.024f, 0.014f), eyeMaterial, Quaternion.Euler(0f, 0f, 6f));
+        CreateLowPolyBox(root, "LeftBrow", new Vector3(-0.082f, 1.635f, 0.236f), new Vector3(0.082f, 0.016f, 0.014f), hairDarkMaterial, Quaternion.Euler(0f, 0f, -14f));
+        CreateLowPolyBox(root, "RightBrow", new Vector3(0.082f, 1.635f, 0.236f), new Vector3(0.082f, 0.016f, 0.014f), hairDarkMaterial, Quaternion.Euler(0f, 0f, 14f));
+        CreateLowPolyBox(root, "NoseBridge", new Vector3(0f, 1.535f, 0.238f), new Vector3(0.026f, 0.076f, 0.016f), skinShadowMaterial, Quaternion.Euler(0f, 0f, 0f));
+        CreateLowPolyBox(root, "Mouth", new Vector3(0f, 1.445f, 0.236f), new Vector3(0.085f, 0.014f, 0.012f), faceLineMaterial, Quaternion.identity);
     }
 
     private void BuildArm(Transform root, float side)
@@ -541,23 +646,38 @@ public class HeroineModelBuilder : MonoBehaviour
         {
             new Vector3(-0.22f, 1.26f, 0.205f),
             new Vector3(0.04f, 1.25f, 0.215f),
-            new Vector3(0.21f, 0.92f, 0.22f),
-            new Vector3(-0.29f, 0.93f, 0.22f)
+            new Vector3(0.19f, 0.97f, 0.22f),
+            new Vector3(-0.27f, 0.98f, 0.22f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "IvoryWrapRight", new[]
         {
             new Vector3(0.24f, 1.20f, 0.21f),
             new Vector3(-0.05f, 1.16f, 0.22f),
-            new Vector3(-0.17f, 0.93f, 0.22f),
-            new Vector3(0.27f, 0.92f, 0.22f)
+            new Vector3(-0.15f, 0.98f, 0.22f),
+            new Vector3(0.25f, 0.97f, 0.22f)
         }, whiteClothMaterial);
 
-        CreateLowPolyBox(root, "UpperHemGoldFront", new Vector3(0f, 0.905f, 0.232f), new Vector3(0.50f, 0.032f, 0.026f), goldMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "UpperHemGoldBack", new Vector3(0f, 0.905f, -0.214f), new Vector3(0.46f, 0.032f, 0.026f), goldMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "MidriffSkinBand", new Vector3(0f, 0.91f, 0.232f), new Vector3(0.29f, 0.090f, 0.020f), skinMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "UpperHemGoldFront", new Vector3(0f, 0.955f, 0.234f), new Vector3(0.46f, 0.028f, 0.024f), goldMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "UpperHemGoldBack", new Vector3(0f, 0.955f, -0.214f), new Vector3(0.42f, 0.028f, 0.024f), goldMaterial, Quaternion.identity);
         CreateLowPolyBox(root, "TealChestInset", new Vector3(0f, 1.115f, 0.232f), new Vector3(0.185f, 0.270f, 0.026f), tealClothMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "LeftShoulderIvoryCap", new Vector3(-0.335f, 1.215f, 0.040f), new Vector3(0.145f, 0.070f, 0.210f), whiteClothMaterial, Quaternion.Euler(0f, 0f, -12f));
-        CreateLowPolyBox(root, "RightShoulderIvoryCap", new Vector3(0.335f, 1.215f, 0.040f), new Vector3(0.145f, 0.070f, 0.210f), whiteClothMaterial, Quaternion.Euler(0f, 0f, 12f));
+        CreatePanel(root, "HighCollarLeft", new[]
+        {
+            new Vector3(-0.04f, 1.20f, 0.205f),
+            new Vector3(-0.18f, 1.28f, 0.155f),
+            new Vector3(-0.18f, 1.43f, 0.060f),
+            new Vector3(-0.04f, 1.34f, 0.155f)
+        }, tealClothMaterial);
+        CreatePanel(root, "HighCollarRight", new[]
+        {
+            new Vector3(0.04f, 1.20f, 0.205f),
+            new Vector3(0.18f, 1.28f, 0.155f),
+            new Vector3(0.18f, 1.43f, 0.060f),
+            new Vector3(0.04f, 1.34f, 0.155f)
+        }, tealClothMaterial);
+        CreateLowPolyBox(root, "LeftShoulderIvoryCap", new Vector3(-0.315f, 1.220f, 0.040f), new Vector3(0.110f, 0.054f, 0.170f), whiteClothMaterial, Quaternion.Euler(0f, 0f, -12f));
+        CreateLowPolyBox(root, "RightShoulderIvoryCap", new Vector3(0.315f, 1.220f, 0.040f), new Vector3(0.110f, 0.054f, 0.170f), whiteClothMaterial, Quaternion.Euler(0f, 0f, 12f));
         CreateLowPolyBox(root, "LeftShoulderGoldPin", new Vector3(-0.315f, 1.245f, 0.175f), new Vector3(0.050f, 0.050f, 0.025f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
         CreateLowPolyBox(root, "RightShoulderGoldPin", new Vector3(0.315f, 1.245f, 0.175f), new Vector3(0.050f, 0.050f, 0.025f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
 
@@ -565,8 +685,8 @@ public class HeroineModelBuilder : MonoBehaviour
         {
             new Vector3(-0.24f, 1.23f, -0.205f),
             new Vector3(0.24f, 1.23f, -0.205f),
-            new Vector3(0.25f, 0.93f, -0.215f),
-            new Vector3(-0.25f, 0.93f, -0.215f)
+            new Vector3(0.23f, 0.98f, -0.215f),
+            new Vector3(-0.23f, 0.98f, -0.215f)
         }, whiteShadowMaterial);
     }
 
@@ -595,34 +715,34 @@ public class HeroineModelBuilder : MonoBehaviour
     {
         CreatePanel(root, "FrontCapeletLeft", new[]
         {
-            new Vector3(-0.05f, 1.30f, 0.16f),
-            new Vector3(-0.52f, 1.18f, 0.10f),
-            new Vector3(-0.42f, 1.00f, 0.17f),
-            new Vector3(-0.08f, 1.08f, 0.22f)
+            new Vector3(-0.05f, 1.31f, 0.16f),
+            new Vector3(-0.45f, 1.20f, 0.10f),
+            new Vector3(-0.36f, 1.07f, 0.17f),
+            new Vector3(-0.08f, 1.13f, 0.22f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "FrontCapeletRight", new[]
         {
-            new Vector3(0.05f, 1.30f, 0.16f),
-            new Vector3(0.52f, 1.18f, 0.10f),
-            new Vector3(0.42f, 1.00f, 0.17f),
-            new Vector3(0.08f, 1.08f, 0.22f)
+            new Vector3(0.05f, 1.31f, 0.16f),
+            new Vector3(0.45f, 1.20f, 0.10f),
+            new Vector3(0.36f, 1.07f, 0.17f),
+            new Vector3(0.08f, 1.13f, 0.22f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "BackCapeletLeft", new[]
         {
             new Vector3(-0.03f, 1.29f, -0.15f),
-            new Vector3(-0.50f, 1.16f, -0.12f),
-            new Vector3(-0.36f, 0.93f, -0.18f),
-            new Vector3(-0.06f, 1.03f, -0.24f)
+            new Vector3(-0.44f, 1.17f, -0.12f),
+            new Vector3(-0.33f, 1.00f, -0.18f),
+            new Vector3(-0.06f, 1.08f, -0.24f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "BackCapeletRight", new[]
         {
             new Vector3(0.03f, 1.29f, -0.15f),
-            new Vector3(0.50f, 1.16f, -0.12f),
-            new Vector3(0.36f, 0.93f, -0.18f),
-            new Vector3(0.06f, 1.03f, -0.24f)
+            new Vector3(0.44f, 1.17f, -0.12f),
+            new Vector3(0.33f, 1.00f, -0.18f),
+            new Vector3(0.06f, 1.08f, -0.24f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "LeftCapeTail", new[]
@@ -711,13 +831,13 @@ public class HeroineModelBuilder : MonoBehaviour
 
     private void BuildHair(Transform root)
     {
-        CreateLowPolySphere(root, "HairCap", new Vector3(0f, 1.66f, -0.02f), new Vector3(0.25f, 0.24f, 0.22f), hairMaterial, 8, 4);
+        CreateLowPolySphere(root, "HairCap", new Vector3(0f, 1.68f, -0.065f), new Vector3(0.25f, 0.22f, 0.18f), hairMaterial, 8, 4);
         CreatePanel(root, "FrontBang", new[]
         {
-            new Vector3(-0.20f, 1.76f, 0.14f),
-            new Vector3(0.11f, 1.72f, 0.17f),
-            new Vector3(-0.03f, 1.43f, 0.20f),
-            new Vector3(-0.27f, 1.47f, 0.16f)
+            new Vector3(-0.25f, 1.76f, 0.205f),
+            new Vector3(0.02f, 1.73f, 0.214f),
+            new Vector3(-0.12f, 1.62f, 0.218f),
+            new Vector3(-0.34f, 1.56f, 0.196f)
         }, hairMaterial);
 
         CreatePanel(root, "BackHairCenter", new[]
@@ -770,10 +890,10 @@ public class HeroineModelBuilder : MonoBehaviour
 
         CreatePanel(root, "HairHighlightFrontSlash", new[]
         {
-            new Vector3(0.02f, 1.74f, 0.185f),
-            new Vector3(0.12f, 1.70f, 0.195f),
-            new Vector3(0.04f, 1.48f, 0.210f),
-            new Vector3(-0.02f, 1.52f, 0.205f)
+            new Vector3(-0.08f, 1.735f, 0.222f),
+            new Vector3(0.02f, 1.705f, 0.228f),
+            new Vector3(-0.08f, 1.610f, 0.230f),
+            new Vector3(-0.15f, 1.630f, 0.220f)
         }, hairHighlightMaterial);
 
         CreatePanel(root, "HairHighlightBackRibbon", new[]

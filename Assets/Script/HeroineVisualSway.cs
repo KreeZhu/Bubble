@@ -31,6 +31,8 @@ public class HeroineVisualSway : MonoBehaviour
         public float side;
     }
 
+    public int TargetCount => targets.Count;
+
     private void Awake()
     {
         RefreshTargets();
@@ -53,11 +55,25 @@ public class HeroineVisualSway : MonoBehaviour
             ? transform.InverseTransformDirection(playerBody.linearVelocity)
             : Vector3.zero;
 
+        ApplySway(localVelocity, Time.deltaTime, Time.time);
+    }
+
+    public int ApplySwayForValidation(Vector3 localVelocity, float deltaTime, float elapsedTime)
+    {
+        if (targets.Count == 0)
+            RefreshTargets();
+
+        return ApplySway(localVelocity, deltaTime, elapsedTime);
+    }
+
+    private int ApplySway(Vector3 localVelocity, float deltaTime, float elapsedTime)
+    {
         float horizontalSpeed = new Vector2(localVelocity.x, localVelocity.z).magnitude;
         float forwardTrail = Mathf.Clamp(localVelocity.z * 1.8f, -1f, 1f);
         float sideTrail = Mathf.Clamp(localVelocity.x * 1.4f, -1f, 1f);
         float verticalTrail = Mathf.Clamp(localVelocity.y * 0.9f, -1f, 1f);
-        float idleWave = Mathf.Sin(Time.time * idleFrequency) * idleAmplitude;
+        float idleWave = Mathf.Sin(elapsedTime * idleFrequency) * idleAmplitude;
+        int changedCount = 0;
 
         for (int i = 0; i < targets.Count; i++)
         {
@@ -84,8 +100,14 @@ public class HeroineVisualSway : MonoBehaviour
 
             Quaternion targetRotation = target.baseRotation * Quaternion.Euler(pitch * motionStrength, yaw * motionStrength, roll);
             float speed = motionStrength > 0.05f ? responseSpeed : returnSpeed;
-            target.transform.localRotation = Quaternion.Slerp(target.transform.localRotation, targetRotation, Time.deltaTime * speed);
+            Quaternion previousRotation = target.transform.localRotation;
+            target.transform.localRotation = Quaternion.Slerp(target.transform.localRotation, targetRotation, deltaTime * speed);
+
+            if (Quaternion.Angle(previousRotation, target.transform.localRotation) > 0.05f)
+                changedCount++;
         }
+
+        return changedCount;
     }
 
     public void RefreshTargets()
