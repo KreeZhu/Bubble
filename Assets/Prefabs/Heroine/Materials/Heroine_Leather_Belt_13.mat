@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Heroine_Leather_Belt_13
-  m_Shader: {fileID: 10755, guid: 0000000000000000f000000000000000, type: 0}
+  m_Shader: {fileID: 4800000, guid: 3ae144bd4f20cd64682501442529efe0, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -24,8 +24,14 @@ Material:
     serializedVersion: 3
     m_TexEnvs: []
     m_Ints: []
-    m_Floats: []
+    m_Floats:
+    - _Cull: 2
+    - _DstBlend: 0
+    - _ShadeStrength: 0.42
+    - _SrcBlend: 1
+    - _ZWrite: 1
     m_Colors:
+    - _BaseColor: {r: 0.42, g: 0.26, b: 0.15, a: 1}
     - _Color: {r: 0.42, g: 0.26, b: 0.15, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

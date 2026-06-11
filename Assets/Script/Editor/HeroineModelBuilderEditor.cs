@@ -104,6 +104,8 @@ public class HeroineModelBuilderEditor : Editor
         GameObject cameraObject = null;
         Camera previewCamera = null;
         Texture2D sheet = null;
+        Color previousAmbientColor = RenderSettings.ambientLight;
+        UnityEngine.Rendering.AmbientMode previousAmbientMode = RenderSettings.ambientMode;
 
         try
         {
@@ -128,11 +130,14 @@ public class HeroineModelBuilderEditor : Editor
                 return null;
             }
 
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.48f, 0.52f, 0.58f, 1f);
+
             lightObject = new GameObject("HeroinePreviewLight");
             lightObject.hideFlags = HideFlags.HideAndDontSave;
             Light light = lightObject.AddComponent<Light>();
             light.type = LightType.Directional;
-            light.intensity = 1.15f;
+            light.intensity = 1.45f;
             light.color = new Color(1.0f, 0.98f, 0.92f, 1f);
             lightObject.transform.rotation = Quaternion.Euler(45f, -35f, 0f);
 
@@ -176,6 +181,8 @@ public class HeroineModelBuilderEditor : Editor
         }
         finally
         {
+            RenderSettings.ambientMode = previousAmbientMode;
+            RenderSettings.ambientLight = previousAmbientColor;
             if (sheet != null)
                 DestroyImmediate(sheet);
             if (previewCamera != null)

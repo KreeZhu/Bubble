@@ -1,6 +1,6 @@
 ﻿# Heroine Model Validation Report
 
-Generated: 2026-05-31 22:31:15
+Generated: 2026-06-01 18:01:53
 Status: PASS
 Player object: Player
 Active visual root: HeroineBakedVisual
@@ -15,20 +15,28 @@ Active visual root: HeroineBakedVisual
 - Saved prefab asset present: True
 
 ## Visual Diagnostics
-- Summary: OK: 97 parts, 4424 vertices, 1512 triangles. Local bounds size (1.25, 1.90, 0.80).
-- Generated part count: 97
-- Generated vertex count: 4424
-- Generated triangle count: 1512
-- Local bounds center: (0.00, 0.95, -0.02)
-- Local bounds size: (1.25, 1.90, 0.80)
+- Summary: OK: 123 parts, 5060 vertices, 1740 triangles. Local bounds size (1.04, 1.88, 0.85).
+- Generated part count: 123
+- Generated vertex count: 5060
+- Generated triangle count: 1740
+- Visual proportion scale: (0.66, 1.12, 0.78)
+- Local bounds center: (0.00, 0.95, 0.01)
+- Local bounds size: (1.04, 1.88, 0.85)
 
 ## Recalculated Bounds
-- Parts: 97
-- Vertices: 4424
-- Triangles: 1512
-- Bounds min: (-0.63, 0.00, -0.42)
-- Bounds max: (0.63, 1.90, 0.38)
-- Bounds size: (1.25, 1.90, 0.80)
+- Parts: 123
+- Vertices: 5060
+- Triangles: 1740
+- Bounds min: (-0.52, 0.00, -0.42)
+- Bounds max: (0.52, 1.89, 0.43)
+- Bounds size: (1.04, 1.88, 0.85)
+
+## Runtime Visual Binding Check
+- Visual root parented to Player: True
+- Visual follow test error: 0.0000
+- Sway component present: True
+- Sway target count: 27
+- Sway targets changed in simulated jump: 27
 
 ## Manual Visual Review Still Required
 - Compare the silhouette to the first concept image in the Scene/Game view.

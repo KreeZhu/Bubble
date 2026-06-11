@@ -16,6 +16,7 @@ public class HeroineModelBuilder : MonoBehaviour
     public bool hideOriginalRenderer = true;
     public bool preferBakedVisual = true;
     public float modelScale = 1f;
+    public Vector3 visualProportionScale = new Vector3(0.66f, 1.12f, 0.78f);
     public Vector3 localOffset = new Vector3(0f, -0.55f, 0f);
 
     [Header("Diagnostics")]
@@ -206,6 +207,7 @@ public class HeroineModelBuilder : MonoBehaviour
         report.AppendLine($"- Generated part count: {generatedPartCount}");
         report.AppendLine($"- Generated vertex count: {generatedVertexCount}");
         report.AppendLine($"- Generated triangle count: {generatedTriangleCount}");
+        report.AppendLine($"- Visual proportion scale: {FormatVector(visualProportionScale)}");
         report.AppendLine($"- Local bounds center: {FormatVector(generatedLocalBounds.center)}");
         report.AppendLine($"- Local bounds size: {FormatVector(generatedLocalBounds.size)}");
         report.AppendLine();
@@ -222,6 +224,8 @@ public class HeroineModelBuilder : MonoBehaviour
             report.AppendLine();
         }
 
+        AppendRuntimeBindingDiagnostics(report, root);
+
         report.AppendLine("## Manual Visual Review Still Required");
         report.AppendLine("- Compare the silhouette to the first concept image in the Scene/Game view.");
         report.AppendLine("- Check front, side, and back readability after baking or prefab saving.");
@@ -231,6 +235,58 @@ public class HeroineModelBuilder : MonoBehaviour
         File.WriteAllText(reportPath, report.ToString(), Encoding.UTF8);
         UnityEditor.AssetDatabase.ImportAsset(reportPath);
         Debug.Log($"Exported heroine validation report: {reportPath}", this);
+    }
+
+    private void AppendRuntimeBindingDiagnostics(StringBuilder report, Transform root)
+    {
+        report.AppendLine("## Runtime Visual Binding Check");
+
+        if (root == null)
+        {
+            report.AppendLine("- Runtime binding test: SKIPPED, no active visual root.");
+            report.AppendLine();
+            return;
+        }
+
+        Vector3 originalPlayerPosition = transform.position;
+        Vector3 originalRootPosition = root.position;
+        Vector3 testDelta = new Vector3(0.37f, 0.21f, -0.16f);
+
+        transform.position = originalPlayerPosition + testDelta;
+        Vector3 followedDelta = root.position - originalRootPosition;
+        float followError = (followedDelta - testDelta).magnitude;
+        transform.position = originalPlayerPosition;
+
+        HeroineVisualSway sway = root.GetComponent<HeroineVisualSway>();
+        int swayTargetCount = 0;
+        int changedSwayTargets = 0;
+
+        if (sway != null)
+        {
+            sway.RefreshTargets();
+            swayTargetCount = sway.TargetCount;
+
+            Dictionary<Transform, Quaternion> originalRotations = new Dictionary<Transform, Quaternion>();
+            foreach (Transform child in root)
+                originalRotations[child] = child.localRotation;
+
+            changedSwayTargets = sway.ApplySwayForValidation(new Vector3(1.3f, 3.8f, 0.7f), 0.16f, 1.25f);
+
+            foreach (KeyValuePair<Transform, Quaternion> pair in originalRotations)
+            {
+                if (pair.Key != null)
+                    pair.Key.localRotation = pair.Value;
+            }
+
+            sway.RefreshTargets();
+        }
+
+        report.AppendLine($"- Visual root parented to Player: {root.parent == transform}");
+        report.AppendLine($"- Visual follow test error: {followError:0.0000}");
+        report.AppendLine($"- Sway component present: {sway != null}");
+        report.AppendLine($"- Sway target count: {swayTargetCount}");
+        report.AppendLine($"- Sway targets changed in simulated jump: {changedSwayTargets}");
+        report.AppendLine();
     }
 
     private static void EnsureAssetFolder(string parentFolder, string childFolder)
@@ -342,10 +398,11 @@ public class HeroineModelBuilder : MonoBehaviour
             root.SetParent(transform, false);
             root.localPosition = localOffset;
             root.localRotation = Quaternion.identity;
-            root.localScale = new Vector3(
+            Vector3 parentCompensationScale = new Vector3(
                 SafeInverse(transform.localScale.x),
                 SafeInverse(transform.localScale.y),
-                SafeInverse(transform.localScale.z)) * modelScale;
+                SafeInverse(transform.localScale.z));
+            root.localScale = Vector3.Scale(parentCompensationScale, visualProportionScale) * modelScale;
 
             BuildBody(root);
             BuildClothing(root);
@@ -415,8 +472,17 @@ public class HeroineModelBuilder : MonoBehaviour
         if (root.parent != transform)
             setupIssues.Add("Heroine visual root is not parented to the Player.");
 
-        if (root.GetComponent<HeroineVisualSway>() == null)
+        HeroineVisualSway sway = root.GetComponent<HeroineVisualSway>();
+        if (sway == null)
+        {
             setupIssues.Add("Heroine visual root is missing HeroineVisualSway.");
+        }
+        else
+        {
+            sway.RefreshTargets();
+            if (sway.TargetCount < 8)
+                setupIssues.Add($"Heroine visual has too few sway targets: {sway.TargetCount}.");
+        }
 
         ValidateGeneratedModel(root, setupIssues);
         ValidateModelBounds(root, setupIssues);
@@ -504,15 +570,15 @@ public class HeroineModelBuilder : MonoBehaviour
 
     private void CreateMaterials()
     {
-        skinMaterial = MakeMaterial("Heroine Skin", new Color(0.94f, 0.66f, 0.49f, 1f));
-        skinShadowMaterial = MakeMaterial("Heroine Skin Shadow", new Color(0.72f, 0.42f, 0.31f, 1f));
+        skinMaterial = MakeMaterial("Heroine Skin", new Color(1.00f, 0.72f, 0.55f, 1f));
+        skinShadowMaterial = MakeMaterial("Heroine Skin Shadow", new Color(0.78f, 0.46f, 0.34f, 1f));
         hairMaterial = MakeMaterial("Heroine Blue Hair", new Color(0.06f, 0.34f, 0.98f, 1f));
         hairDarkMaterial = MakeMaterial("Heroine Dark Blue Hair", new Color(0.03f, 0.14f, 0.52f, 1f));
         hairHighlightMaterial = MakeMaterial("Heroine Clear Blue Hair Highlight", new Color(0.16f, 0.68f, 1.00f, 1f));
         eyeMaterial = MakeMaterial("Heroine Blue Eyes", new Color(0.22f, 0.72f, 1.00f, 1f));
-        faceLineMaterial = MakeMaterial("Heroine Face Lines", new Color(0.09f, 0.07f, 0.08f, 1f));
-        whiteClothMaterial = MakeMaterial("Heroine Ivory Cloth", new Color(0.94f, 0.89f, 0.78f, 1f));
-        whiteShadowMaterial = MakeMaterial("Heroine Ivory Cloth Shadow", new Color(0.78f, 0.73f, 0.62f, 1f));
+        faceLineMaterial = MakeMaterial("Heroine Face Lines", new Color(0.34f, 0.16f, 0.13f, 1f));
+        whiteClothMaterial = MakeMaterial("Heroine Ivory Cloth", new Color(1.00f, 0.96f, 0.84f, 1f));
+        whiteShadowMaterial = MakeMaterial("Heroine Ivory Cloth Shadow", new Color(0.86f, 0.80f, 0.66f, 1f));
         tealClothMaterial = MakeMaterial("Heroine Teal Cloth", new Color(0.09f, 0.38f, 0.42f, 1f));
         darkLeggingMaterial = MakeMaterial("Heroine Dark Leggings", new Color(0.12f, 0.13f, 0.16f, 1f));
         beltMaterial = MakeMaterial("Heroine Leather Belt", new Color(0.42f, 0.26f, 0.15f, 1f));
@@ -526,7 +592,9 @@ public class HeroineModelBuilder : MonoBehaviour
 
     private Material MakeMaterial(string materialName, Color color)
     {
-        Shader shader = Shader.Find("Universal Render Pipeline/Simple Lit");
+        Shader shader = Shader.Find("Bubble/Heroine Low Poly Flat");
+        if (shader == null)
+            shader = Shader.Find("Universal Render Pipeline/Simple Lit");
         if (shader == null)
             shader = Shader.Find("Universal Render Pipeline/Lit");
         if (shader == null)
@@ -545,6 +613,8 @@ public class HeroineModelBuilder : MonoBehaviour
             material.SetFloat("_Metallic", 0f);
         if (material.HasProperty("_SpecColor"))
             material.SetColor("_SpecColor", new Color(0.08f, 0.08f, 0.08f, 1f));
+        if (material.HasProperty("_ShadeStrength"))
+            material.SetFloat("_ShadeStrength", 0.42f);
         ApplyGeneratedObjectFlags(material);
         return material;
     }
@@ -574,13 +644,13 @@ public class HeroineModelBuilder : MonoBehaviour
 
     private void BuildBody(Transform root)
     {
-        CreateLowPolySphere(root, "Head", new Vector3(0f, 1.55f, 0.02f), new Vector3(0.21f, 0.27f, 0.19f), skinMaterial, 8, 5);
-        CreateTaperedCylinder(root, "Neck", new Vector3(0f, 1.27f, 0f), new Vector3(0f, 1.39f, 0f), 0.07f, 0.08f, skinMaterial, 6);
+        CreateLowPolySphere(root, "Head", new Vector3(0f, 1.56f, 0.02f), new Vector3(0.19f, 0.265f, 0.17f), skinMaterial, 8, 5);
+        CreateTaperedCylinder(root, "Neck", new Vector3(0f, 1.28f, 0f), new Vector3(0f, 1.40f, 0f), 0.055f, 0.070f, skinMaterial, 6);
         BuildFace(root);
 
-        CreateLowPolySphere(root, "TorsoCore", new Vector3(0f, 1.05f, 0f), new Vector3(0.34f, 0.42f, 0.20f), tealClothMaterial, 8, 4);
-        CreateLowPolySphere(root, "Hips", new Vector3(0f, 0.75f, 0f), new Vector3(0.30f, 0.18f, 0.19f), darkLeggingMaterial, 8, 3);
-        CreateLowPolyBox(root, "SlimWaistGap", new Vector3(0f, 0.845f, 0f), new Vector3(0.44f, 0.035f, 0.31f), darkLeggingMaterial, Quaternion.identity);
+        CreateLowPolyPrism(root, "TorsoCore", new Vector3(0f, 1.075f, 0.010f), 0.52f, 0.335f, 0.250f, 0.245f, tealClothMaterial);
+        CreateLowPolyPrism(root, "Hips", new Vector3(0f, 0.780f, 0.005f), 0.190f, 0.270f, 0.310f, 0.215f, darkLeggingMaterial);
+        CreateLowPolyBox(root, "SlimWaistGap", new Vector3(0f, 0.885f, 0f), new Vector3(0.34f, 0.032f, 0.26f), darkLeggingMaterial, Quaternion.identity);
 
         BuildArm(root, -1f);
         BuildArm(root, 1f);
@@ -590,45 +660,57 @@ public class HeroineModelBuilder : MonoBehaviour
 
     private void BuildFace(Transform root)
     {
-        CreateLowPolyBox(root, "LeftEye", new Vector3(-0.078f, 1.585f, 0.232f), new Vector3(0.064f, 0.024f, 0.014f), eyeMaterial, Quaternion.Euler(0f, 0f, -6f));
-        CreateLowPolyBox(root, "RightEye", new Vector3(0.078f, 1.585f, 0.232f), new Vector3(0.064f, 0.024f, 0.014f), eyeMaterial, Quaternion.Euler(0f, 0f, 6f));
-        CreateLowPolyBox(root, "LeftBrow", new Vector3(-0.082f, 1.635f, 0.236f), new Vector3(0.082f, 0.016f, 0.014f), hairDarkMaterial, Quaternion.Euler(0f, 0f, -14f));
-        CreateLowPolyBox(root, "RightBrow", new Vector3(0.082f, 1.635f, 0.236f), new Vector3(0.082f, 0.016f, 0.014f), hairDarkMaterial, Quaternion.Euler(0f, 0f, 14f));
-        CreateLowPolyBox(root, "NoseBridge", new Vector3(0f, 1.535f, 0.238f), new Vector3(0.026f, 0.076f, 0.016f), skinShadowMaterial, Quaternion.Euler(0f, 0f, 0f));
-        CreateLowPolyBox(root, "Mouth", new Vector3(0f, 1.445f, 0.236f), new Vector3(0.085f, 0.014f, 0.012f), faceLineMaterial, Quaternion.identity);
+        CreateLowPolySphere(root, "FaceSoftPlane", new Vector3(0f, 1.535f, 0.188f), new Vector3(0.135f, 0.185f, 0.028f), skinMaterial, 8, 4);
+        CreatePanel(root, "FaceFrontPanel", new[]
+        {
+            new Vector3(-0.110f, 1.655f, 0.236f),
+            new Vector3(0.110f, 1.655f, 0.236f),
+            new Vector3(0.095f, 1.430f, 0.246f),
+            new Vector3(-0.095f, 1.430f, 0.246f)
+        }, skinMaterial);
+        CreateLowPolyBox(root, "LeftEye", new Vector3(-0.058f, 1.585f, 0.260f), new Vector3(0.052f, 0.022f, 0.010f), eyeMaterial, Quaternion.Euler(0f, 0f, -4f));
+        CreateLowPolyBox(root, "RightEye", new Vector3(0.058f, 1.585f, 0.260f), new Vector3(0.052f, 0.022f, 0.010f), eyeMaterial, Quaternion.Euler(0f, 0f, 4f));
+        CreateLowPolyBox(root, "LeftBrow", new Vector3(-0.060f, 1.625f, 0.262f), new Vector3(0.060f, 0.010f, 0.010f), hairDarkMaterial, Quaternion.Euler(0f, 0f, -12f));
+        CreateLowPolyBox(root, "RightBrow", new Vector3(0.060f, 1.625f, 0.262f), new Vector3(0.060f, 0.010f, 0.010f), hairDarkMaterial, Quaternion.Euler(0f, 0f, 12f));
+        CreateLowPolyBox(root, "NoseBridge", new Vector3(0f, 1.530f, 0.264f), new Vector3(0.012f, 0.040f, 0.008f), skinShadowMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "Mouth", new Vector3(0f, 1.462f, 0.262f), new Vector3(0.040f, 0.008f, 0.008f), faceLineMaterial, Quaternion.identity);
+        CreateLowPolySphere(root, "LeftEar", new Vector3(-0.185f, 1.545f, 0.005f), new Vector3(0.028f, 0.052f, 0.022f), skinMaterial, 6, 3);
+        CreateLowPolySphere(root, "RightEar", new Vector3(0.185f, 1.545f, 0.005f), new Vector3(0.028f, 0.052f, 0.022f), skinMaterial, 6, 3);
     }
 
     private void BuildArm(Transform root, float side)
     {
-        Vector3 shoulder = new Vector3(side * 0.32f, 1.20f, 0.01f);
-        Vector3 elbow = new Vector3(side * 0.48f, 0.84f, 0.03f);
-        Vector3 wrist = new Vector3(side * 0.55f, 0.55f, 0.05f);
+        Vector3 shoulder = new Vector3(side * 0.285f, 1.18f, 0.01f);
+        Vector3 elbow = new Vector3(side * 0.405f, 0.86f, 0.03f);
+        Vector3 wrist = new Vector3(side * 0.455f, 0.56f, 0.05f);
 
-        CreateTaperedCylinder(root, SideName(side, "UpperArm"), shoulder, elbow, 0.055f, 0.045f, skinMaterial, 6);
-        CreateTaperedCylinder(root, SideName(side, "Forearm"), elbow, wrist, 0.047f, 0.036f, skinMaterial, 6);
-        CreateTaperedCylinder(root, SideName(side, "Bracer"), Vector3.Lerp(elbow, wrist, 0.25f), Vector3.Lerp(elbow, wrist, 0.92f), 0.065f, 0.055f, tealClothMaterial, 6);
+        CreateTaperedCylinder(root, SideName(side, "UpperArm"), shoulder, elbow, 0.045f, 0.037f, skinMaterial, 6);
+        CreateTaperedCylinder(root, SideName(side, "Forearm"), elbow, wrist, 0.039f, 0.030f, skinMaterial, 6);
+        CreateTaperedCylinder(root, SideName(side, "Bracer"), Vector3.Lerp(elbow, wrist, 0.25f), Vector3.Lerp(elbow, wrist, 0.92f), 0.054f, 0.045f, tealClothMaterial, 6);
         CreateLowPolySphere(root, SideName(side, "Hand"), wrist + new Vector3(side * 0.015f, -0.045f, 0.02f), new Vector3(0.045f, 0.075f, 0.035f), skinMaterial, 6, 3);
-        CreateTaperedCylinder(root, SideName(side, "WristGoldBand"), Vector3.Lerp(elbow, wrist, 0.86f), Vector3.Lerp(elbow, wrist, 0.95f), 0.061f, 0.058f, goldMaterial, 6);
+        CreateTaperedCylinder(root, SideName(side, "WristGoldBand"), Vector3.Lerp(elbow, wrist, 0.86f), Vector3.Lerp(elbow, wrist, 0.95f), 0.050f, 0.047f, goldMaterial, 6);
     }
 
     private void BuildLeg(Transform root, float side)
     {
-        Vector3 hip = new Vector3(side * 0.16f, 0.72f, 0.02f);
-        Vector3 knee = new Vector3(side * 0.17f, 0.38f, 0.02f);
-        Vector3 ankle = new Vector3(side * 0.17f, 0.12f, 0.02f);
+        Vector3 hip = new Vector3(side * 0.125f, 0.79f, 0.02f);
+        Vector3 knee = new Vector3(side * 0.145f, 0.43f, 0.02f);
+        Vector3 ankle = new Vector3(side * 0.155f, 0.12f, 0.02f);
 
-        CreateTaperedCylinder(root, SideName(side, "Thigh"), hip, knee, 0.085f, 0.075f, darkLeggingMaterial, 6);
-        CreateTaperedCylinder(root, SideName(side, "Shin"), knee, ankle, 0.073f, 0.052f, darkLeggingMaterial, 6);
+        CreateTaperedCylinder(root, SideName(side, "Thigh"), hip, knee, 0.062f, 0.054f, darkLeggingMaterial, 6);
+        CreateTaperedCylinder(root, SideName(side, "Shin"), knee, ankle, 0.052f, 0.040f, darkLeggingMaterial, 6);
 
-        CreateLowPolySphere(root, SideName(side, "StreamlinedShoe"), new Vector3(side * 0.17f, 0.060f, 0.13f), new Vector3(0.092f, 0.052f, 0.235f), shoeMetalMaterial, 8, 3);
-        CreateLowPolyBox(root, SideName(side, "ShoeDarkFloatingSole"), new Vector3(side * 0.17f, 0.014f, 0.12f), new Vector3(0.18f, 0.020f, 0.38f), shoeShadowMetalMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, SideName(side, "ShoeSilverToeCap"), new Vector3(side * 0.17f, 0.070f, 0.315f), new Vector3(0.145f, 0.046f, 0.120f), shoeBrightMetalMaterial, Quaternion.Euler(-7f, 0f, 0f));
-        CreateLowPolyBox(root, SideName(side, "ShoeGoldHeel"), new Vector3(side * 0.17f, 0.065f, -0.080f), new Vector3(0.105f, 0.060f, 0.050f), goldMaterial, Quaternion.identity);
-        CreateTaperedCylinder(root, SideName(side, "ShoeMetalAnkleCuff"), new Vector3(side * 0.17f, 0.105f, 0.0f), new Vector3(side * 0.17f, 0.195f, 0.0f), 0.085f, 0.075f, shoeBrightMetalMaterial, 6);
-        CreateLowPolyBox(root, SideName(side, "ShoeInstepGoldLine"), new Vector3(side * 0.17f, 0.127f, 0.135f), new Vector3(0.115f, 0.018f, 0.215f), goldMaterial, Quaternion.Euler(-9f, 0f, 0f));
-        CreateLowPolyBox(root, SideName(side, "ShoeOuterFlowFin"), new Vector3(side * 0.270f, 0.065f, 0.105f), new Vector3(0.024f, 0.040f, 0.285f), shoeBrightMetalMaterial, Quaternion.Euler(0f, side * -8f, side * 8f));
-        CreateLowPolyBox(root, SideName(side, "ShoeInnerDarkInset"), new Vector3(side * 0.095f, 0.062f, 0.115f), new Vector3(0.020f, 0.032f, 0.230f), shoeShadowMetalMaterial, Quaternion.Euler(0f, side * 6f, side * -4f));
-        CreateLowPolyBox(root, SideName(side, "ShoeRearWing"), new Vector3(side * 0.17f, 0.098f, -0.120f), new Vector3(0.130f, 0.020f, 0.145f), shoeBrightMetalMaterial, Quaternion.Euler(10f, 0f, 0f));
+        CreateLowPolySphere(root, SideName(side, "StreamlinedShoe"), new Vector3(side * 0.155f, 0.060f, 0.13f), new Vector3(0.074f, 0.046f, 0.220f), shoeMetalMaterial, 8, 3);
+        CreateLowPolyBox(root, SideName(side, "ShoeDarkFloatingSole"), new Vector3(side * 0.155f, 0.014f, 0.12f), new Vector3(0.138f, 0.018f, 0.335f), shoeShadowMetalMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, SideName(side, "ShoeSilverToeCap"), new Vector3(side * 0.155f, 0.070f, 0.305f), new Vector3(0.112f, 0.040f, 0.104f), shoeBrightMetalMaterial, Quaternion.Euler(-7f, 0f, 0f));
+        CreateLowPolyBox(root, SideName(side, "ShoeGoldHeel"), new Vector3(side * 0.155f, 0.064f, -0.078f), new Vector3(0.082f, 0.052f, 0.044f), goldMaterial, Quaternion.identity);
+        CreateTaperedCylinder(root, SideName(side, "ShoeMetalAnkleCuff"), new Vector3(side * 0.155f, 0.105f, 0.0f), new Vector3(side * 0.155f, 0.190f, 0.0f), 0.066f, 0.058f, shoeBrightMetalMaterial, 6);
+        CreateLowPolyBox(root, SideName(side, "ShoeInstepGoldLine"), new Vector3(side * 0.155f, 0.125f, 0.135f), new Vector3(0.088f, 0.014f, 0.195f), goldMaterial, Quaternion.Euler(-9f, 0f, 0f));
+        CreateLowPolyBox(root, SideName(side, "ShoeOuterFlowFin"), new Vector3(side * 0.230f, 0.064f, 0.105f), new Vector3(0.018f, 0.034f, 0.250f), shoeBrightMetalMaterial, Quaternion.Euler(0f, side * -8f, side * 8f));
+        CreateLowPolyBox(root, SideName(side, "ShoeInnerDarkInset"), new Vector3(side * 0.090f, 0.062f, 0.115f), new Vector3(0.016f, 0.028f, 0.205f), shoeShadowMetalMaterial, Quaternion.Euler(0f, side * 6f, side * -4f));
+        CreateLowPolyBox(root, SideName(side, "ShoeRearWing"), new Vector3(side * 0.155f, 0.096f, -0.112f), new Vector3(0.098f, 0.018f, 0.125f), shoeBrightMetalMaterial, Quaternion.Euler(10f, 0f, 0f));
+        CreateLowPolyBox(root, SideName(side, "ShoeForwardBlade"), new Vector3(side * 0.155f, 0.044f, 0.375f), new Vector3(0.086f, 0.016f, 0.112f), shoeBrightMetalMaterial, Quaternion.Euler(-10f, 0f, 0f));
+        CreateLowPolyBox(root, SideName(side, "ShoeTealFlowLine"), new Vector3(side * 0.205f, 0.105f, 0.160f), new Vector3(0.014f, 0.014f, 0.195f), tealClothMaterial, Quaternion.Euler(-8f, side * -8f, side * 6f));
     }
 
     private void BuildClothing(Transform root)
@@ -644,121 +726,150 @@ public class HeroineModelBuilder : MonoBehaviour
     {
         CreatePanel(root, "IvoryWrapLeft", new[]
         {
-            new Vector3(-0.22f, 1.26f, 0.205f),
-            new Vector3(0.04f, 1.25f, 0.215f),
-            new Vector3(0.19f, 0.97f, 0.22f),
-            new Vector3(-0.27f, 0.98f, 0.22f)
+            new Vector3(-0.205f, 1.235f, 0.200f),
+            new Vector3(-0.028f, 1.210f, 0.215f),
+            new Vector3(-0.090f, 1.000f, 0.225f),
+            new Vector3(-0.250f, 0.995f, 0.210f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "IvoryWrapRight", new[]
         {
-            new Vector3(0.24f, 1.20f, 0.21f),
-            new Vector3(-0.05f, 1.16f, 0.22f),
-            new Vector3(-0.15f, 0.98f, 0.22f),
-            new Vector3(0.25f, 0.97f, 0.22f)
+            new Vector3(0.028f, 1.210f, 0.215f),
+            new Vector3(0.205f, 1.235f, 0.200f),
+            new Vector3(0.250f, 0.995f, 0.210f),
+            new Vector3(0.090f, 1.000f, 0.225f)
         }, whiteClothMaterial);
 
-        CreateLowPolyBox(root, "MidriffSkinBand", new Vector3(0f, 0.91f, 0.232f), new Vector3(0.29f, 0.090f, 0.020f), skinMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "UpperHemGoldFront", new Vector3(0f, 0.955f, 0.234f), new Vector3(0.46f, 0.028f, 0.024f), goldMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "UpperHemGoldBack", new Vector3(0f, 0.955f, -0.214f), new Vector3(0.42f, 0.028f, 0.024f), goldMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "TealChestInset", new Vector3(0f, 1.115f, 0.232f), new Vector3(0.185f, 0.270f, 0.026f), tealClothMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "UpperJacketLeftThickness", new Vector3(-0.205f, 1.110f, 0.070f), new Vector3(0.040f, 0.230f, 0.220f), whiteShadowMaterial, Quaternion.Euler(0f, -8f, -8f));
+        CreateLowPolyBox(root, "UpperJacketRightThickness", new Vector3(0.205f, 1.110f, 0.070f), new Vector3(0.040f, 0.230f, 0.220f), whiteShadowMaterial, Quaternion.Euler(0f, 8f, 8f));
+
+        CreateLowPolyBox(root, "MidriffSkinBand", new Vector3(0f, 0.925f, 0.232f), new Vector3(0.225f, 0.082f, 0.018f), skinMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "UpperHemGoldFront", new Vector3(0f, 0.968f, 0.234f), new Vector3(0.330f, 0.022f, 0.020f), goldMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "UpperHemGoldBack", new Vector3(0f, 0.968f, -0.200f), new Vector3(0.320f, 0.022f, 0.020f), goldMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "TealChestInset", new Vector3(0f, 1.115f, 0.226f), new Vector3(0.205f, 0.260f, 0.024f), tealClothMaterial, Quaternion.identity);
+        CreatePanel(root, "TealTunicFrontFacet", new[]
+        {
+            new Vector3(-0.130f, 1.245f, 0.238f),
+            new Vector3(0.130f, 1.245f, 0.238f),
+            new Vector3(0.100f, 0.980f, 0.246f),
+            new Vector3(-0.100f, 0.980f, 0.246f)
+        }, tealClothMaterial);
+        CreateLowPolyBox(root, "LeftUpperWrapGoldSeam", new Vector3(-0.095f, 1.105f, 0.240f), new Vector3(0.014f, 0.235f, 0.014f), goldMaterial, Quaternion.Euler(0f, 0f, -10f));
+        CreateLowPolyBox(root, "RightUpperWrapGoldSeam", new Vector3(0.095f, 1.105f, 0.240f), new Vector3(0.014f, 0.235f, 0.014f), goldMaterial, Quaternion.Euler(0f, 0f, 10f));
         CreatePanel(root, "HighCollarLeft", new[]
         {
-            new Vector3(-0.04f, 1.20f, 0.205f),
-            new Vector3(-0.18f, 1.28f, 0.155f),
-            new Vector3(-0.18f, 1.43f, 0.060f),
-            new Vector3(-0.04f, 1.34f, 0.155f)
+            new Vector3(-0.075f, 1.155f, 0.120f),
+            new Vector3(-0.150f, 1.210f, 0.010f),
+            new Vector3(-0.130f, 1.260f, -0.045f),
+            new Vector3(-0.060f, 1.230f, 0.055f)
         }, tealClothMaterial);
         CreatePanel(root, "HighCollarRight", new[]
         {
-            new Vector3(0.04f, 1.20f, 0.205f),
-            new Vector3(0.18f, 1.28f, 0.155f),
-            new Vector3(0.18f, 1.43f, 0.060f),
-            new Vector3(0.04f, 1.34f, 0.155f)
+            new Vector3(0.075f, 1.155f, 0.120f),
+            new Vector3(0.150f, 1.210f, 0.010f),
+            new Vector3(0.130f, 1.260f, -0.045f),
+            new Vector3(0.060f, 1.230f, 0.055f)
         }, tealClothMaterial);
-        CreateLowPolyBox(root, "LeftShoulderIvoryCap", new Vector3(-0.315f, 1.220f, 0.040f), new Vector3(0.110f, 0.054f, 0.170f), whiteClothMaterial, Quaternion.Euler(0f, 0f, -12f));
-        CreateLowPolyBox(root, "RightShoulderIvoryCap", new Vector3(0.315f, 1.220f, 0.040f), new Vector3(0.110f, 0.054f, 0.170f), whiteClothMaterial, Quaternion.Euler(0f, 0f, 12f));
-        CreateLowPolyBox(root, "LeftShoulderGoldPin", new Vector3(-0.315f, 1.245f, 0.175f), new Vector3(0.050f, 0.050f, 0.025f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
-        CreateLowPolyBox(root, "RightShoulderGoldPin", new Vector3(0.315f, 1.245f, 0.175f), new Vector3(0.050f, 0.050f, 0.025f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
+        CreateLowPolyBox(root, "LeftShoulderIvoryCap", new Vector3(-0.275f, 1.220f, 0.045f), new Vector3(0.078f, 0.040f, 0.125f), whiteClothMaterial, Quaternion.Euler(0f, 0f, -13f));
+        CreateLowPolyBox(root, "RightShoulderIvoryCap", new Vector3(0.275f, 1.220f, 0.045f), new Vector3(0.078f, 0.040f, 0.125f), whiteClothMaterial, Quaternion.Euler(0f, 0f, 13f));
+        CreateLowPolyBox(root, "LeftShoulderGoldPin", new Vector3(-0.275f, 1.240f, 0.145f), new Vector3(0.034f, 0.034f, 0.018f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
+        CreateLowPolyBox(root, "RightShoulderGoldPin", new Vector3(0.275f, 1.240f, 0.145f), new Vector3(0.034f, 0.034f, 0.018f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
 
         CreatePanel(root, "IvoryUpperBackPanel", new[]
         {
-            new Vector3(-0.24f, 1.23f, -0.205f),
-            new Vector3(0.24f, 1.23f, -0.205f),
-            new Vector3(0.23f, 0.98f, -0.215f),
-            new Vector3(-0.23f, 0.98f, -0.215f)
+            new Vector3(-0.205f, 1.215f, -0.190f),
+            new Vector3(0.205f, 1.215f, -0.190f),
+            new Vector3(0.195f, 0.990f, -0.200f),
+            new Vector3(-0.195f, 0.990f, -0.200f)
         }, whiteShadowMaterial);
     }
 
     private void CreateSeparatedWaist(Transform root)
     {
-        CreateLowPolyBox(root, "WaistBeltFront", new Vector3(0f, 0.84f, 0.20f), new Vector3(0.62f, 0.075f, 0.045f), beltMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "WaistBeltBack", new Vector3(0f, 0.84f, -0.20f), new Vector3(0.62f, 0.075f, 0.045f), beltMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "WaistBeltLeft", new Vector3(-0.33f, 0.84f, 0f), new Vector3(0.045f, 0.075f, 0.36f), beltMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "WaistBeltRight", new Vector3(0.33f, 0.84f, 0f), new Vector3(0.045f, 0.075f, 0.36f), beltMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "FrontBuckle", new Vector3(0f, 0.855f, 0.235f), new Vector3(0.12f, 0.12f, 0.025f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
+        CreateLowPolyBox(root, "WaistBeltFront", new Vector3(0f, 0.855f, 0.185f), new Vector3(0.440f, 0.060f, 0.036f), beltMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "WaistBeltBack", new Vector3(0f, 0.855f, -0.185f), new Vector3(0.440f, 0.060f, 0.036f), beltMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "WaistBeltLeft", new Vector3(-0.245f, 0.855f, 0f), new Vector3(0.034f, 0.060f, 0.305f), beltMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "WaistBeltRight", new Vector3(0.245f, 0.855f, 0f), new Vector3(0.034f, 0.060f, 0.305f), beltMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "FrontBuckle", new Vector3(0f, 0.865f, 0.218f), new Vector3(0.090f, 0.090f, 0.020f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
     }
 
     private void CreateSeparatedLower(Transform root)
     {
-        CreateLowPolyBox(root, "LowerShortsFront", new Vector3(0f, 0.715f, 0.205f), new Vector3(0.46f, 0.155f, 0.050f), tealClothMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "LowerShortsBack", new Vector3(0f, 0.715f, -0.205f), new Vector3(0.46f, 0.155f, 0.050f), tealClothMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "LeftLowerShortsSide", new Vector3(-0.255f, 0.710f, 0f), new Vector3(0.055f, 0.150f, 0.320f), tealClothMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "RightLowerShortsSide", new Vector3(0.255f, 0.710f, 0f), new Vector3(0.055f, 0.150f, 0.320f), tealClothMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "LowerWaistGoldTrimFront", new Vector3(0f, 0.795f, 0.232f), new Vector3(0.50f, 0.026f, 0.025f), goldMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "LowerWaistGoldTrimBack", new Vector3(0f, 0.795f, -0.232f), new Vector3(0.50f, 0.026f, 0.025f), goldMaterial, Quaternion.identity);
-        CreateLowPolyBox(root, "LeftSeparatedShortsLeg", new Vector3(-0.135f, 0.625f, 0.060f), new Vector3(0.180f, 0.090f, 0.230f), tealClothMaterial, Quaternion.Euler(0f, 0f, -3f));
-        CreateLowPolyBox(root, "RightSeparatedShortsLeg", new Vector3(0.135f, 0.625f, 0.060f), new Vector3(0.180f, 0.090f, 0.230f), tealClothMaterial, Quaternion.Euler(0f, 0f, 3f));
+        CreateLowPolyBox(root, "LowerShortsFront", new Vector3(0f, 0.735f, 0.190f), new Vector3(0.340f, 0.125f, 0.040f), tealClothMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "LowerShortsBack", new Vector3(0f, 0.735f, -0.190f), new Vector3(0.340f, 0.125f, 0.040f), tealClothMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "LeftLowerShortsSide", new Vector3(-0.190f, 0.730f, 0f), new Vector3(0.040f, 0.125f, 0.275f), tealClothMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "RightLowerShortsSide", new Vector3(0.190f, 0.730f, 0f), new Vector3(0.040f, 0.125f, 0.275f), tealClothMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "LowerWaistGoldTrimFront", new Vector3(0f, 0.805f, 0.218f), new Vector3(0.365f, 0.020f, 0.020f), goldMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "LowerWaistGoldTrimBack", new Vector3(0f, 0.805f, -0.218f), new Vector3(0.365f, 0.020f, 0.020f), goldMaterial, Quaternion.identity);
+        CreateLowPolyBox(root, "LeftSeparatedShortsLeg", new Vector3(-0.105f, 0.660f, 0.055f), new Vector3(0.130f, 0.072f, 0.190f), tealClothMaterial, Quaternion.Euler(0f, 0f, -3f));
+        CreateLowPolyBox(root, "RightSeparatedShortsLeg", new Vector3(0.105f, 0.660f, 0.055f), new Vector3(0.130f, 0.072f, 0.190f), tealClothMaterial, Quaternion.Euler(0f, 0f, 3f));
+        CreateLowPolyPrism(root, "LowerShortsUnifiedShell", new Vector3(0f, 0.725f, 0.005f), 0.170f, 0.320f, 0.250f, 0.250f, tealClothMaterial);
     }
 
     private void CreateCapelet(Transform root)
     {
         CreatePanel(root, "FrontCapeletLeft", new[]
         {
-            new Vector3(-0.05f, 1.31f, 0.16f),
-            new Vector3(-0.45f, 1.20f, 0.10f),
-            new Vector3(-0.36f, 1.07f, 0.17f),
-            new Vector3(-0.08f, 1.13f, 0.22f)
+            new Vector3(-0.095f, 1.285f, 0.175f),
+            new Vector3(-0.315f, 1.220f, 0.105f),
+            new Vector3(-0.255f, 1.135f, 0.140f),
+            new Vector3(-0.105f, 1.175f, 0.218f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "FrontCapeletRight", new[]
         {
-            new Vector3(0.05f, 1.31f, 0.16f),
-            new Vector3(0.45f, 1.20f, 0.10f),
-            new Vector3(0.36f, 1.07f, 0.17f),
-            new Vector3(0.08f, 1.13f, 0.22f)
+            new Vector3(0.095f, 1.285f, 0.175f),
+            new Vector3(0.315f, 1.220f, 0.105f),
+            new Vector3(0.255f, 1.135f, 0.140f),
+            new Vector3(0.105f, 1.175f, 0.218f)
         }, whiteClothMaterial);
+
+        CreatePanel(root, "FrontCapeletLeftGoldTrim", new[]
+        {
+            new Vector3(-0.252f, 1.132f, 0.153f),
+            new Vector3(-0.105f, 1.166f, 0.228f),
+            new Vector3(-0.096f, 1.148f, 0.230f),
+            new Vector3(-0.252f, 1.114f, 0.166f)
+        }, goldMaterial);
+
+        CreatePanel(root, "FrontCapeletRightGoldTrim", new[]
+        {
+            new Vector3(0.105f, 1.166f, 0.228f),
+            new Vector3(0.252f, 1.132f, 0.153f),
+            new Vector3(0.252f, 1.114f, 0.166f),
+            new Vector3(0.096f, 1.148f, 0.230f)
+        }, goldMaterial);
 
         CreatePanel(root, "BackCapeletLeft", new[]
         {
-            new Vector3(-0.03f, 1.29f, -0.15f),
-            new Vector3(-0.44f, 1.17f, -0.12f),
-            new Vector3(-0.33f, 1.00f, -0.18f),
-            new Vector3(-0.06f, 1.08f, -0.24f)
+            new Vector3(-0.03f, 1.275f, -0.145f),
+            new Vector3(-0.330f, 1.175f, -0.115f),
+            new Vector3(-0.255f, 1.020f, -0.175f),
+            new Vector3(-0.055f, 1.080f, -0.225f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "BackCapeletRight", new[]
         {
-            new Vector3(0.03f, 1.29f, -0.15f),
-            new Vector3(0.44f, 1.17f, -0.12f),
-            new Vector3(0.33f, 1.00f, -0.18f),
-            new Vector3(0.06f, 1.08f, -0.24f)
+            new Vector3(0.03f, 1.275f, -0.145f),
+            new Vector3(0.330f, 1.175f, -0.115f),
+            new Vector3(0.255f, 1.020f, -0.175f),
+            new Vector3(0.055f, 1.080f, -0.225f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "LeftCapeTail", new[]
         {
-            new Vector3(-0.28f, 1.00f, -0.23f),
-            new Vector3(-0.10f, 0.98f, -0.26f),
-            new Vector3(-0.13f, 0.48f, -0.38f),
-            new Vector3(-0.40f, 0.55f, -0.30f)
+            new Vector3(-0.235f, 1.00f, -0.225f),
+            new Vector3(-0.095f, 0.98f, -0.255f),
+            new Vector3(-0.115f, 0.44f, -0.365f),
+            new Vector3(-0.330f, 0.54f, -0.295f)
         }, tealClothMaterial);
 
         CreatePanel(root, "RightCapeTail", new[]
         {
-            new Vector3(0.10f, 0.98f, -0.26f),
-            new Vector3(0.28f, 1.00f, -0.23f),
-            new Vector3(0.40f, 0.55f, -0.30f),
-            new Vector3(0.13f, 0.48f, -0.38f)
+            new Vector3(0.095f, 0.98f, -0.255f),
+            new Vector3(0.235f, 1.00f, -0.225f),
+            new Vector3(0.330f, 0.54f, -0.295f),
+            new Vector3(0.115f, 0.44f, -0.365f)
         }, tealClothMaterial);
     }
 
@@ -766,119 +877,183 @@ public class HeroineModelBuilder : MonoBehaviour
     {
         CreatePanel(root, "LongLeftSkirtPanel", new[]
         {
-            new Vector3(-0.31f, 0.82f, 0.20f),
-            new Vector3(0.12f, 0.82f, 0.22f),
-            new Vector3(-0.03f, 0.52f, 0.23f),
-            new Vector3(-0.44f, 0.10f, 0.19f)
+            new Vector3(-0.235f, 0.835f, 0.195f),
+            new Vector3(0.070f, 0.835f, 0.215f),
+            new Vector3(-0.035f, 0.530f, 0.225f),
+            new Vector3(-0.340f, 0.090f, 0.190f)
         }, tealClothMaterial);
+        CreateLowPolyBox(root, "LongLeftSkirtPanelFold", new Vector3(-0.165f, 0.505f, 0.205f), new Vector3(0.020f, 0.540f, 0.026f), tealClothMaterial, Quaternion.Euler(0f, 0f, -24f));
 
         CreatePanel(root, "IvoryFrontSkirtPanel", new[]
         {
-            new Vector3(-0.08f, 0.83f, 0.235f),
-            new Vector3(0.32f, 0.82f, 0.21f),
-            new Vector3(0.24f, 0.48f, 0.19f),
-            new Vector3(-0.22f, 0.38f, 0.23f)
+            new Vector3(-0.055f, 0.835f, 0.228f),
+            new Vector3(0.240f, 0.825f, 0.205f),
+            new Vector3(0.185f, 0.490f, 0.190f),
+            new Vector3(-0.160f, 0.390f, 0.225f)
         }, whiteClothMaterial);
+        CreateLowPolyBox(root, "IvoryFrontSkirtFold", new Vector3(0.055f, 0.615f, 0.218f), new Vector3(0.018f, 0.365f, 0.024f), whiteShadowMaterial, Quaternion.Euler(0f, 0f, 16f));
 
         CreatePanel(root, "BackAsymSkirtPanel", new[]
         {
-            new Vector3(-0.30f, 0.82f, -0.22f),
-            new Vector3(0.34f, 0.82f, -0.20f),
-            new Vector3(0.25f, 0.42f, -0.22f),
-            new Vector3(-0.42f, 0.22f, -0.24f)
+            new Vector3(-0.230f, 0.825f, -0.210f),
+            new Vector3(0.250f, 0.825f, -0.195f),
+            new Vector3(0.190f, 0.430f, -0.215f),
+            new Vector3(-0.315f, 0.220f, -0.230f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "RightRearTealPanel", new[]
         {
-            new Vector3(0.22f, 0.81f, -0.10f),
-            new Vector3(0.42f, 0.79f, -0.05f),
-            new Vector3(0.48f, 0.20f, -0.07f),
-            new Vector3(0.25f, 0.40f, -0.13f)
+            new Vector3(0.175f, 0.815f, -0.095f),
+            new Vector3(0.315f, 0.795f, -0.050f),
+            new Vector3(0.360f, 0.190f, -0.070f),
+            new Vector3(0.205f, 0.400f, -0.125f)
         }, tealClothMaterial);
 
         CreatePanel(root, "GoldHemLongLeft", new[]
         {
-            new Vector3(-0.44f, 0.10f, 0.205f),
-            new Vector3(-0.02f, 0.52f, 0.245f),
-            new Vector3(-0.01f, 0.49f, 0.255f),
-            new Vector3(-0.43f, 0.07f, 0.215f)
+            new Vector3(-0.340f, 0.090f, 0.205f),
+            new Vector3(-0.030f, 0.520f, 0.238f),
+            new Vector3(-0.022f, 0.495f, 0.248f),
+            new Vector3(-0.330f, 0.065f, 0.215f)
         }, goldMaterial);
 
         CreatePanel(root, "LeftAirySideSash", new[]
         {
-            new Vector3(-0.36f, 0.80f, 0.04f),
-            new Vector3(-0.24f, 0.76f, 0.10f),
-            new Vector3(-0.30f, 0.25f, 0.06f),
-            new Vector3(-0.55f, 0.08f, -0.02f)
+            new Vector3(-0.275f, 0.805f, 0.040f),
+            new Vector3(-0.185f, 0.765f, 0.095f),
+            new Vector3(-0.225f, 0.250f, 0.060f),
+            new Vector3(-0.410f, 0.080f, -0.020f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "RightAirySideSash", new[]
         {
-            new Vector3(0.24f, 0.76f, 0.10f),
-            new Vector3(0.36f, 0.80f, 0.04f),
-            new Vector3(0.55f, 0.08f, -0.02f),
-            new Vector3(0.30f, 0.25f, 0.06f)
+            new Vector3(0.185f, 0.765f, 0.095f),
+            new Vector3(0.275f, 0.805f, 0.040f),
+            new Vector3(0.410f, 0.080f, -0.020f),
+            new Vector3(0.225f, 0.250f, 0.060f)
         }, whiteClothMaterial);
 
         CreatePanel(root, "BackTealWindPanel", new[]
         {
-            new Vector3(-0.10f, 0.80f, -0.255f),
-            new Vector3(0.17f, 0.80f, -0.255f),
-            new Vector3(0.24f, 0.05f, -0.36f),
-            new Vector3(-0.18f, 0.20f, -0.36f)
+            new Vector3(-0.080f, 0.805f, -0.245f),
+            new Vector3(0.130f, 0.805f, -0.245f),
+            new Vector3(0.185f, 0.050f, -0.345f),
+            new Vector3(-0.140f, 0.200f, -0.345f)
         }, tealClothMaterial);
     }
 
     private void BuildHair(Transform root)
     {
-        CreateLowPolySphere(root, "HairCap", new Vector3(0f, 1.68f, -0.065f), new Vector3(0.25f, 0.22f, 0.18f), hairMaterial, 8, 4);
+        CreateLowPolySphere(root, "HairCap", new Vector3(0f, 1.68f, -0.065f), new Vector3(0.225f, 0.205f, 0.165f), hairMaterial, 8, 4);
         CreatePanel(root, "FrontBang", new[]
         {
-            new Vector3(-0.25f, 1.76f, 0.205f),
-            new Vector3(0.02f, 1.73f, 0.214f),
-            new Vector3(-0.12f, 1.62f, 0.218f),
-            new Vector3(-0.34f, 1.56f, 0.196f)
+            new Vector3(-0.225f, 1.750f, 0.190f),
+            new Vector3(0.010f, 1.725f, 0.205f),
+            new Vector3(-0.095f, 1.645f, 0.214f),
+            new Vector3(-0.275f, 1.600f, 0.188f)
+        }, hairMaterial);
+
+        CreatePanel(root, "FrontBangRightShard", new[]
+        {
+            new Vector3(0.010f, 1.725f, 0.205f),
+            new Vector3(0.205f, 1.690f, 0.190f),
+            new Vector3(0.235f, 1.585f, 0.182f),
+            new Vector3(0.065f, 1.640f, 0.214f)
         }, hairMaterial);
 
         CreatePanel(root, "BackHairCenter", new[]
         {
-            new Vector3(-0.14f, 1.55f, -0.22f),
-            new Vector3(0.15f, 1.55f, -0.22f),
-            new Vector3(0.12f, 0.45f, -0.36f),
-            new Vector3(-0.13f, 0.40f, -0.37f)
+            new Vector3(-0.125f, 1.55f, -0.220f),
+            new Vector3(0.130f, 1.55f, -0.220f),
+            new Vector3(0.100f, 0.45f, -0.340f),
+            new Vector3(-0.110f, 0.40f, -0.350f)
+        }, hairMaterial);
+        CreatePanel(root, "BackHairCenterRidge", new[]
+        {
+            new Vector3(-0.018f, 1.400f, -0.330f),
+            new Vector3(0.040f, 1.385f, -0.330f),
+            new Vector3(0.025f, 0.520f, -0.365f),
+            new Vector3(-0.028f, 0.540f, -0.365f)
         }, hairMaterial);
 
         CreatePanel(root, "BackHairLeft", new[]
         {
-            new Vector3(-0.24f, 1.48f, -0.16f),
-            new Vector3(-0.08f, 1.50f, -0.25f),
-            new Vector3(-0.23f, 0.43f, -0.42f),
-            new Vector3(-0.42f, 0.69f, -0.28f)
+            new Vector3(-0.220f, 1.48f, -0.160f),
+            new Vector3(-0.075f, 1.50f, -0.245f),
+            new Vector3(-0.205f, 0.43f, -0.395f),
+            new Vector3(-0.350f, 0.69f, -0.275f)
         }, hairMaterial);
 
         CreatePanel(root, "BackHairRight", new[]
         {
-            new Vector3(0.08f, 1.50f, -0.25f),
-            new Vector3(0.24f, 1.48f, -0.16f),
-            new Vector3(0.42f, 0.69f, -0.28f),
-            new Vector3(0.23f, 0.43f, -0.42f)
+            new Vector3(0.075f, 1.50f, -0.245f),
+            new Vector3(0.220f, 1.48f, -0.160f),
+            new Vector3(0.350f, 0.69f, -0.275f),
+            new Vector3(0.205f, 0.43f, -0.395f)
         }, hairMaterial);
 
         CreatePanel(root, "SideHairLeft", new[]
         {
-            new Vector3(-0.22f, 1.52f, 0.03f),
-            new Vector3(-0.30f, 1.42f, -0.12f),
-            new Vector3(-0.24f, 0.92f, -0.12f),
-            new Vector3(-0.14f, 1.00f, 0.02f)
+            new Vector3(-0.195f, 1.520f, 0.020f),
+            new Vector3(-0.265f, 1.420f, -0.120f),
+            new Vector3(-0.215f, 0.920f, -0.120f),
+            new Vector3(-0.125f, 1.000f, 0.020f)
         }, hairDarkMaterial);
 
         CreatePanel(root, "SideHairRight", new[]
         {
-            new Vector3(0.30f, 1.42f, -0.12f),
-            new Vector3(0.22f, 1.52f, 0.03f),
-            new Vector3(0.14f, 1.00f, 0.02f),
-            new Vector3(0.24f, 0.92f, -0.12f)
+            new Vector3(0.265f, 1.420f, -0.120f),
+            new Vector3(0.195f, 1.520f, 0.020f),
+            new Vector3(0.125f, 1.000f, 0.020f),
+            new Vector3(0.215f, 0.920f, -0.120f)
         }, hairDarkMaterial);
+
+        CreatePanel(root, "FaceLockLeft", new[]
+        {
+            new Vector3(-0.185f, 1.525f, 0.140f),
+            new Vector3(-0.275f, 1.430f, 0.060f),
+            new Vector3(-0.215f, 1.005f, 0.038f),
+            new Vector3(-0.112f, 1.165f, 0.150f)
+        }, hairMaterial);
+
+        CreatePanel(root, "FaceLockRight", new[]
+        {
+            new Vector3(0.275f, 1.430f, 0.060f),
+            new Vector3(0.185f, 1.525f, 0.140f),
+            new Vector3(0.112f, 1.165f, 0.150f),
+            new Vector3(0.215f, 1.005f, 0.038f)
+        }, hairMaterial);
+
+        CreatePanel(root, "BackHairOuterLeft", new[]
+        {
+            new Vector3(-0.270f, 1.42f, -0.165f),
+            new Vector3(-0.170f, 1.47f, -0.275f),
+            new Vector3(-0.300f, 0.30f, -0.420f),
+            new Vector3(-0.420f, 0.62f, -0.300f)
+        }, hairDarkMaterial);
+
+        CreatePanel(root, "BackHairOuterRight", new[]
+        {
+            new Vector3(0.170f, 1.47f, -0.275f),
+            new Vector3(0.270f, 1.42f, -0.165f),
+            new Vector3(0.420f, 0.62f, -0.300f),
+            new Vector3(0.300f, 0.30f, -0.420f)
+        }, hairDarkMaterial);
+        CreatePanel(root, "LeftBackHairInnerFacet", new[]
+        {
+            new Vector3(-0.170f, 1.410f, -0.290f),
+            new Vector3(-0.065f, 1.455f, -0.320f),
+            new Vector3(-0.120f, 0.430f, -0.405f),
+            new Vector3(-0.240f, 0.620f, -0.365f)
+        }, hairMaterial);
+
+        CreatePanel(root, "RightBackHairInnerFacet", new[]
+        {
+            new Vector3(0.065f, 1.455f, -0.320f),
+            new Vector3(0.170f, 1.410f, -0.290f),
+            new Vector3(0.240f, 0.620f, -0.365f),
+            new Vector3(0.120f, 0.430f, -0.405f)
+        }, hairMaterial);
 
         CreatePanel(root, "BackHairLowerTip", new[]
         {
@@ -898,26 +1073,26 @@ public class HeroineModelBuilder : MonoBehaviour
 
         CreatePanel(root, "HairHighlightBackRibbon", new[]
         {
-            new Vector3(-0.03f, 1.48f, -0.365f),
-            new Vector3(0.07f, 1.46f, -0.365f),
-            new Vector3(0.04f, 0.55f, -0.420f),
-            new Vector3(-0.04f, 0.54f, -0.420f)
+            new Vector3(-0.018f, 1.365f, -0.345f),
+            new Vector3(0.040f, 1.350f, -0.345f),
+            new Vector3(0.025f, 0.690f, -0.378f),
+            new Vector3(-0.025f, 0.705f, -0.378f)
         }, hairHighlightMaterial);
     }
 
     private void BuildAccessories(Transform root)
     {
-        CreateLowPolyBox(root, "ChestClasp", new Vector3(0f, 1.23f, 0.235f), new Vector3(0.13f, 0.13f, 0.035f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
-        CreateLowPolyBox(root, "RightHipPouch", new Vector3(0.42f, 0.74f, 0.04f), new Vector3(0.16f, 0.20f, 0.10f), beltMaterial, Quaternion.Euler(0f, 8f, 0f));
-        CreateTaperedCylinder(root, "BubbleCharmStrap", new Vector3(0.45f, 0.66f, 0.10f), new Vector3(0.47f, 0.53f, 0.12f), 0.012f, 0.012f, goldMaterial, 6);
-        CreateLowPolySphere(root, "BubbleCharm", new Vector3(0.48f, 0.48f, 0.14f), new Vector3(0.07f, 0.07f, 0.07f), bubbleMaterial, 8, 4);
+        CreateLowPolyBox(root, "ChestClasp", new Vector3(0f, 1.185f, 0.238f), new Vector3(0.092f, 0.092f, 0.030f), goldMaterial, Quaternion.Euler(0f, 0f, 45f));
+        CreateLowPolyBox(root, "RightHipPouch", new Vector3(0.335f, 0.750f, 0.050f), new Vector3(0.110f, 0.160f, 0.080f), beltMaterial, Quaternion.Euler(0f, 8f, 0f));
+        CreateTaperedCylinder(root, "BubbleCharmStrap", new Vector3(0.365f, 0.680f, 0.100f), new Vector3(0.390f, 0.540f, 0.120f), 0.010f, 0.010f, goldMaterial, 6);
+        CreateLowPolySphere(root, "BubbleCharm", new Vector3(0.405f, 0.495f, 0.140f), new Vector3(0.060f, 0.060f, 0.060f), bubbleMaterial, 8, 4);
     }
 
     private void ValidateGeneratedModel(Transform root, List<string> validationIssues)
     {
         string[] requiredParts =
         {
-            "Head", "TorsoCore", "Hips",
+            "Head", "FaceSoftPlane", "FaceFrontPanel", "LeftEar", "RightEar", "TorsoCore", "Hips",
             "LeftUpperArm", "RightUpperArm", "LeftForearm", "RightForearm",
             "LeftBracer", "RightBracer", "LeftHand", "RightHand",
             "LeftThigh", "RightThigh", "LeftShin", "RightShin",
@@ -925,12 +1100,20 @@ public class HeroineModelBuilder : MonoBehaviour
             "LeftShoeMetalAnkleCuff", "RightShoeMetalAnkleCuff",
             "LeftShoeOuterFlowFin", "RightShoeOuterFlowFin",
             "LeftShoeRearWing", "RightShoeRearWing",
+            "LeftShoeForwardBlade", "RightShoeForwardBlade",
+            "LeftShoeTealFlowLine", "RightShoeTealFlowLine",
             "WaistBeltFront", "WaistBeltBack", "WaistBeltLeft", "WaistBeltRight",
-            "UpperHemGoldFront", "LowerShortsFront", "LowerShortsBack",
-            "LeftSeparatedShortsLeg", "RightSeparatedShortsLeg",
+            "UpperHemGoldFront", "TealTunicFrontFacet",
+            "LeftUpperWrapGoldSeam", "RightUpperWrapGoldSeam",
+            "UpperJacketLeftThickness", "UpperJacketRightThickness",
+            "LowerShortsFront", "LowerShortsBack",
+            "LowerShortsUnifiedShell", "LeftSeparatedShortsLeg", "RightSeparatedShortsLeg",
             "FrontCapeletLeft", "FrontCapeletRight", "BackCapeletLeft", "BackCapeletRight",
+            "FrontCapeletLeftGoldTrim", "FrontCapeletRightGoldTrim",
             "LongLeftSkirtPanel", "IvoryFrontSkirtPanel", "BackAsymSkirtPanel", "RightRearTealPanel",
             "HairCap", "BackHairCenter", "BackHairLeft", "BackHairRight",
+            "BackHairCenterRidge", "BackHairOuterLeft", "BackHairOuterRight",
+            "LeftBackHairInnerFacet", "RightBackHairInnerFacet", "FaceLockLeft", "FaceLockRight",
             "BackHairLowerTip", "RightHipPouch", "BubbleCharm"
         };
 
@@ -950,6 +1133,7 @@ public class HeroineModelBuilder : MonoBehaviour
     {
         const float tolerance = 0.055f;
         ValidateMirrorPair(root, "LeftUpperArm", "RightUpperArm", tolerance, validationIssues);
+        ValidateMirrorPair(root, "LeftEar", "RightEar", tolerance, validationIssues);
         ValidateMirrorPair(root, "LeftForearm", "RightForearm", tolerance, validationIssues);
         ValidateMirrorPair(root, "LeftBracer", "RightBracer", tolerance, validationIssues);
         ValidateMirrorPair(root, "LeftHand", "RightHand", tolerance, validationIssues);
@@ -959,14 +1143,22 @@ public class HeroineModelBuilder : MonoBehaviour
         ValidateMirrorPair(root, "LeftShoeMetalAnkleCuff", "RightShoeMetalAnkleCuff", tolerance, validationIssues);
         ValidateMirrorPair(root, "LeftShoeOuterFlowFin", "RightShoeOuterFlowFin", tolerance, validationIssues);
         ValidateMirrorPair(root, "LeftShoeRearWing", "RightShoeRearWing", tolerance, validationIssues);
+        ValidateMirrorPair(root, "LeftShoeForwardBlade", "RightShoeForwardBlade", tolerance, validationIssues);
+        ValidateMirrorPair(root, "LeftShoeTealFlowLine", "RightShoeTealFlowLine", tolerance, validationIssues);
         ValidateMirrorPair(root, "LeftShoulderIvoryCap", "RightShoulderIvoryCap", tolerance, validationIssues);
         ValidateMirrorPair(root, "LeftShoulderGoldPin", "RightShoulderGoldPin", tolerance, validationIssues);
+        ValidateMirrorPair(root, "LeftUpperWrapGoldSeam", "RightUpperWrapGoldSeam", tolerance, validationIssues);
+        ValidateMirrorPair(root, "UpperJacketLeftThickness", "UpperJacketRightThickness", tolerance, validationIssues);
         ValidateMirrorPair(root, "LeftSeparatedShortsLeg", "RightSeparatedShortsLeg", tolerance, validationIssues);
         ValidateMirrorPair(root, "FrontCapeletLeft", "FrontCapeletRight", tolerance, validationIssues);
+        ValidateMirrorPair(root, "FrontCapeletLeftGoldTrim", "FrontCapeletRightGoldTrim", tolerance, validationIssues);
         ValidateMirrorPair(root, "BackCapeletLeft", "BackCapeletRight", tolerance, validationIssues);
         ValidateMirrorPair(root, "LeftCapeTail", "RightCapeTail", tolerance, validationIssues);
         ValidateMirrorPair(root, "SideHairLeft", "SideHairRight", tolerance, validationIssues);
+        ValidateMirrorPair(root, "FaceLockLeft", "FaceLockRight", tolerance, validationIssues);
         ValidateMirrorPair(root, "BackHairLeft", "BackHairRight", tolerance, validationIssues);
+        ValidateMirrorPair(root, "BackHairOuterLeft", "BackHairOuterRight", tolerance, validationIssues);
+        ValidateMirrorPair(root, "LeftBackHairInnerFacet", "RightBackHairInnerFacet", tolerance, validationIssues);
     }
 
     private void ValidateMirrorPair(Transform root, string leftName, string rightName, float tolerance, List<string> validationIssues)
@@ -1161,6 +1353,12 @@ public class HeroineModelBuilder : MonoBehaviour
         CreateMeshObject(root, objectName, mesh, material, localPosition, Quaternion.identity);
     }
 
+    private void CreateLowPolyPrism(Transform root, string objectName, Vector3 localPosition, float height, float topWidth, float bottomWidth, float depth, Material material)
+    {
+        Mesh mesh = CreateTaperedPrismMesh(height, topWidth, bottomWidth, depth);
+        CreateMeshObject(root, objectName, mesh, material, localPosition, Quaternion.identity);
+    }
+
     private void CreateTaperedCylinder(Transform root, string objectName, Vector3 start, Vector3 end, float startRadius, float endRadius, Material material, int segments)
     {
         Vector3 direction = end - start;
@@ -1211,6 +1409,40 @@ public class HeroineModelBuilder : MonoBehaviour
         };
 
         return CreateFlatMesh("BoxMesh", corners, faceIndices);
+    }
+
+    private Mesh CreateTaperedPrismMesh(float height, float topWidth, float bottomWidth, float depth)
+    {
+        float top = height * 0.5f;
+        float bottom = -height * 0.5f;
+        float topHalf = topWidth * 0.5f;
+        float bottomHalf = bottomWidth * 0.5f;
+        float front = depth * 0.5f;
+        float back = -depth * 0.5f;
+
+        Vector3[] vertices =
+        {
+            new Vector3(-topHalf, top, front),
+            new Vector3(topHalf, top, front),
+            new Vector3(bottomHalf, bottom, front),
+            new Vector3(-bottomHalf, bottom, front),
+            new Vector3(-topHalf, top, back),
+            new Vector3(topHalf, top, back),
+            new Vector3(bottomHalf, bottom, back),
+            new Vector3(-bottomHalf, bottom, back)
+        };
+
+        int[] triangles =
+        {
+            0, 1, 2, 0, 2, 3,
+            5, 4, 7, 5, 7, 6,
+            4, 0, 3, 4, 3, 7,
+            1, 5, 6, 1, 6, 2,
+            4, 5, 1, 4, 1, 0,
+            3, 2, 6, 3, 6, 7
+        };
+
+        return CreateFlatMesh("TaperedPrismMesh", vertices, triangles);
     }
 
     private Mesh CreateSphereMesh(Vector3 radius, int longitudeSegments, int latitudeSegments)

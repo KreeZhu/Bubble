@@ -117,13 +117,16 @@ public class HeroineVisualSway : MonoBehaviour
 
         AddTargets(SwayKind.Hair,
             "BackHairCenter", "BackHairLeft", "BackHairRight", "SideHairLeft", "SideHairRight",
-            "BackHairLowerTip", "HairHighlightBackRibbon");
+            "FaceLockLeft", "FaceLockRight", "BackHairOuterLeft", "BackHairOuterRight",
+            "LeftBackHairInnerFacet", "RightBackHairInnerFacet",
+            "BackHairCenterRidge", "BackHairLowerTip", "HairHighlightBackRibbon");
 
         AddTargets(SwayKind.Cape,
             "LeftCapeTail", "RightCapeTail", "BackCapeletLeft", "BackCapeletRight");
 
         AddTargets(SwayKind.Cloth,
             "LongLeftSkirtPanel", "IvoryFrontSkirtPanel", "BackAsymSkirtPanel", "RightRearTealPanel",
+            "LongLeftSkirtPanelFold", "IvoryFrontSkirtFold",
             "LeftAirySideSash", "RightAirySideSash", "BackTealWindPanel");
     }
 
